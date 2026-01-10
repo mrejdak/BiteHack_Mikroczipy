@@ -1,0 +1,27 @@
+symulacja
+symulowanie ruchu sieć satelitów
+symulowanie śmieci kosmicznych
+symulowanie innych satelitów do ominięcia
+
+komunikacja między satelitami
+GNN do budowy topologii sieci między satelitami, naprawy na bieżąco przy awariach
+
+agent do sterowania ruchem satelity
+wyznaczenie najlepszej trasy do śmiecia
+ruch do śmiecia
+omijanie innych obiektów na trasie
+agent potrzebuje mieć środowisko na którym będzie mógł się uczyć i działać
+
+zakładamy, że satelita jest w stanie doczepić ładunek wybuchowy do śmiecia w celu wyhamowania go na tyle aby wypadł z niskiej orbity okołoziemskiej i spłonął w atmosferze
+
+optymalizacja trasy i manewrów lamberta do minimalnego zużycia propellantu
+
+system agentowy satelit
+
+Projekt jest na 4 osoby na 24 godziny, więc mogą być poczynione minimalne, zdroworozsądkowe założenia
+Całość musi być hackatonowa dlatego całość musi być catchy zarówno na prezentacji jak i podczas opowiadania
+
+Rozpatrz sworzenia osobnych symulacji dla całej ziemii i osobnej dla agentów
+Ten RL dla agentów musi być dopieszczony, żeby to był fajny selling point, że potrafią same podlecieć, zostawić ładunek wybuchowy i zniszczyć śmieć(albo zrobić coś co jest używane w nauce) i żeby to działało
+Daj spójny plan co zrobić
+Zrób to najlepiej jak możesz
