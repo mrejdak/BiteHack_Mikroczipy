@@ -17,7 +17,7 @@ class OrbitalBody:
     radius: float # collision radius in meters
     type: str  # 'satellite', 'debris', 'janitor'
     fuel: float = 0.0 # Only for active satellites
-    active: bool = True
+    active: bool = True 
 
 class PhysicsEngine:
     def __init__(self, dt: float = 1.0):

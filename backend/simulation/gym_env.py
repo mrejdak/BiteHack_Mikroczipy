@@ -4,7 +4,7 @@ import numpy as np
 import math
 from typing import Optional, Tuple
 
-from .physics_engine import PhysicsEngine, OrbitalBody, G, M_EARTH, R_EARTH
+from simulation.physics_engine import PhysicsEngine, OrbitalBody, G, M_EARTH, R_EARTH
 
 class OrbitalJanitorEnv(gym.Env):
     metadata = {'render_modes': ['human']}
@@ -32,7 +32,7 @@ class OrbitalJanitorEnv(gym.Env):
 
         # Action Space: Continuous Thrust [Fx, Fy, Fz]
         # Range [-1, 1], scaled to max_thrust
-        self.max_thrust = 1000.0 # Newtons (Reduced for precision)
+        self.max_thrust = 10.0 # Newtons (Reduced for precision)
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(3,), dtype=np.float32
         )
