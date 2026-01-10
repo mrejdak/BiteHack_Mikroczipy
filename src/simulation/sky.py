@@ -190,53 +190,59 @@ class Constellation:
             
             return True
 
-    def update_traffic(self, time):
-        # Simulate traffic fluctuation and stochastic link usage
-        # This makes 'bw_occupied' dynamic
-        
-        # Pseudo-random generator seeded by roughly time to be consistent within a frame but changing over time
-        seed = int(time * 10) 
-        rng = np.random.default_rng(seed)
+    def update_traffic(self, time, positions):
+        # Simulate traffic based on DISTANCE (User Request)
+        # load_factor proportional to link distance
+        MAX_DIST = 5000.0 # Approx max ISL distance in km
         
         for u, v in self.graph.edges():
             # Enforce symmetry: only process if u < v
             if u > v: continue
             
-            # Base background traffic (10% to 60%)
-            load_factor = rng.uniform(0.1, 0.6)
+            # Check if active (if not, load means nothing, but safe to calc)
+            if u not in positions or v not in positions:
+                continue
+
+            pos_u = positions[u]
+            pos_v = positions[v]
             
-            # Random Bursts (hotspots)
-            if rng.random() < 0.1: # 10% links are heavy
-                load_factor = rng.uniform(0.8, 0.95)
+            dist = np.linalg.norm(pos_u - pos_v)
             
-            # Stochastic Quality Drop (Interference)
+            # Normalize Load: 0.0 at 0km, 1.0 at MAX_DIST
+            # Use a curve or linear? Linear is simplest.
+            # load_factor = dist / MAX_DIST
+            # But we want avoid > 1.0
+            load_factor = min(1.0, dist / MAX_DIST)
+            
+            # Quality is usually good unless very far?
             quality = 1.0
-            if rng.random() < 0.01:
-                quality = 0.1 # Very bad
+            if dist > 4500: quality = 0.5 # Degradation at extreme range
 
             # Apply to Forward Link (u -> v)
             self.graph.edges[u, v]['bw_occupied'] = self.graph.edges[u, v]['bw_total'] * load_factor
             self.graph.edges[u, v]['quality'] = quality
+            self.graph.edges[u, v]['distance'] = dist # Store distance for AI/Reward
 
             # Apply to Reverse Link (v -> u) if exists
             if self.graph.has_edge(v, u):
                 self.graph.edges[v, u]['bw_occupied'] = self.graph.edges[v, u]['bw_total'] * load_factor
                 self.graph.edges[v, u]['quality'] = quality
+                self.graph.edges[v, u]['distance'] = dist
 
     def get_dynamic_graph(self, time):
-        # 1. Update Traffic/Physics
-        self.update_traffic(time)
+        # 0. Calculate Positions (Needed for Traffic AND LoS)
+        positions = {}
+        for sat_id, sat in self.satellites.items():
+            positions[sat_id] = sat.get_position(time)
+
+        # 1. Update Traffic/Physics (Distance Based)
+        self.update_traffic(time, positions)
         
         # 2. Build Graph based on Active + LoS
         # We need to transfer edge attributes (BW, load) to the new dynamic graph
         
         active_edges = []
         
-        # Cache positions
-        positions = {}
-        for sat_id, sat in self.satellites.items():
-            positions[sat_id] = sat.get_position(time)
-            
         for u, v in self.graph.edges():
             # Node Status Check
             if not self.satellites[u].is_active or not self.satellites[v].is_active:

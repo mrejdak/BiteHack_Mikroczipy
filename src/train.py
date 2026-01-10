@@ -1,10 +1,11 @@
 import torch
-import numpy as np
+import torch.optim as optim
 import random
-from src.simulation.sky import Constellation
-from src.model.gnn import GNNEncoder
-from src.model.agent import DRLAgent
 import networkx as nx
+import numpy as np
+from src.simulation.sky import Constellation
+from src.model.agent import DRLAgent
+from src.model.gnn import GNNEncoder
 
 def get_node_features(constellation):
     # Determine features: [1, 0] for active, [0, 1] for inactive ?
@@ -144,11 +145,13 @@ def train(num_episodes=400, progress_callback=None):
                 f1_avail = (attrs['bw_total'] - attrs['bw_occupied']) / attrs['bw_total']
                 f2_occ = attrs['bw_occupied'] / attrs['bw_total']
                 f3_bet = attrs['betweenness']
-                f4_act = 1.0 # This packet is trying to use it
-                f5_pad = 0.0
+                f4_act = 1.0 
+                # f5: Normalized Distance (using stored attribute if available, else calc)
+                dist = attrs.get('distance', 1000.0)
+                f5_dist = dist / 5000.0
                 
-                # Tensor [5] -> Pad to [20] (n=20)
-                lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, f4_act, f5_pad], dtype=torch.float32)
+                # Tensor [5] -> Pad to [20]
+                lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, f4_act, f5_dist], dtype=torch.float32)
                 padding = torch.zeros(15, dtype=torch.float32)
                 lf = torch.cat([lf_base, padding])
                 
@@ -159,33 +162,52 @@ def train(num_episodes=400, progress_callback=None):
             # 3. Take Step
             next_node = action
             
-            # Reward Parameters: alpha1=0.9, alpha2=0.9, lambda=1
-            # R = alpha1 * (Throughput/Avail) - alpha2 * (Delay/Hop) - lambda * (Loss)
-            # Assuming: Throughput factor = (1 - congestion)
-            #           Delay factor = 1 (per hop cost)
-            #           Loss factor = 1 if congested else 0
+            # --- Calculate Distances for Reward ---
+            pos_curr = constellation.satellites[current].get_position(t)
+            pos_next = constellation.satellites[next_node].get_position(t)
+            pos_dst = constellation.satellites[dst].get_position(t)
+            
+            dist_curr_dest = np.linalg.norm(pos_curr - pos_dst)
+            dist_next_dest = np.linalg.norm(pos_next - pos_dst)
+            dist_link = np.linalg.norm(pos_curr - pos_next)
+            
+            # Distance Heuristic (Potential Field)
+            progress = (dist_curr_dest - dist_next_dest) / 5000.0
             
             attrs = dynamic_graph.edges[current, next_node]
             congestion = attrs['bw_occupied'] / attrs['bw_total']
             
+            # Paper Params + User Request
             alpha1 = 0.9
             alpha2 = 0.9
             lam = 1.0
             
             # Reward Components
-            r_throughput = (1.0 - congestion) # Higher is better
-            r_delay = 0.1 # Constant cost per hop? Or normalized delay?
-            r_loss = 1.0 if congestion > 0.9 else 0.0 # High risk if full
+            r_throughput = (1.0 - congestion) 
             
-            # Paper Reward Structure (Inferred):
-            # Reward = alpha1 * T - alpha2 * D - lambda * L
-            reward = (alpha1 * r_throughput) - (alpha2 * r_delay) - (lam * r_loss)
+            # 2. Delay/Distance (Minimize): 
+            # Cost = Normalized Link Distance + Fixed Hop Cost (User Request)
+            hop_cost = 0.5
+            dist_cost = dist_link / 5000.0
+            r_delay = dist_cost + hop_cost
+            
+            # 3. Packet Loss (Minimize)
+            r_loss = 1.0 if congestion > 0.9 else 0.0
+            
+            # Base Reward from GRouting
+            step_reward = (alpha1 * r_throughput) - (alpha2 * r_delay) - (lam * r_loss)
+            
+            # Add Shaping to ensure finding route
+            reward = step_reward + (progress * 2.0) # Stronger weight on progress
             
             if next_node == dst:
-                reward += 10.0 # Success Bonus (independent of paper parameters, needed for convergence)
+                reward += 200.0 # Huge Success Bonus to override any accumulated costs
                 done = True
             else:
                 done = False
+                # Penalize loops/stuck
+                if next_node in path:
+                    reward -= 5.0 # Penalty for visiting visited node
             
             # Update Agent
             with torch.no_grad():

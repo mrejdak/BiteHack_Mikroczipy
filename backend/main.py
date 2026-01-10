@@ -217,8 +217,12 @@ def calculate_ai_path(src, dst, dynamic_graph):
             f2_occ = attrs['bw_occupied'] / attrs['bw_total']
             f3_bet = attrs['betweenness']
             
+            # Use stored distance if available
+            dist = attrs.get('distance', 1000.0)
+            f5_dist = dist / 5000.0
+            
             # Pad to 20 dims (n=20)
-            lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, 1.0, 0.0], dtype=torch.float32)
+            lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, 1.0, f5_dist], dtype=torch.float32)
             padding = torch.zeros(15, dtype=torch.float32)
             lf = torch.cat([lf_base, padding])
             
