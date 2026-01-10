@@ -45,7 +45,7 @@ def get_adjacency_matrix(constellation):
     
     return adj
 
-def train(num_episodes=500, progress_callback=None):
+def train(num_episodes=400, progress_callback=None):
     num_orbits = 4
     num_sats = 20
     constellation = Constellation(num_orbits, num_sats)
@@ -56,14 +56,40 @@ def train(num_episodes=500, progress_callback=None):
     hidden_dim = 32
     embedding_dim = 32
     
-    gnn = GNNEncoder(feature_dim, hidden_dim, embedding_dim)
-    agent = DRLAgent(embedding_dim, hidden_dim)
+    # Parameters from Paper:
+    # K=12 (GNN Layers)
+    # lr=0.0001, gamma=0.9, Buffer=3000
+    gnn = GNNEncoder(feature_dim, hidden_dim, embedding_dim, num_layers=12)
+    agent = DRLAgent(embedding_dim, hidden_dim, lr=0.0001, gamma=0.9, buffer_size=3000)
     
-    print("Starting Training...")
+    # --- Check for Saved Model ---
+    import os
+    model_path = "model.pth"
+    
+    if os.path.exists(model_path):
+        print(f"Loading trained model from {model_path}...")
+        checkpoint = torch.load(model_path)
+        agent.q_network.load_state_dict(checkpoint['agent_state_dict'])
+        agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        gnn.load_state_dict(checkpoint['gnn_state_dict'])
+        agent.epsilon = checkpoint.get('epsilon', 0.01) # Low epsilon for trained model
+        print("Model loaded successfully. Skipping training.")
+        
+        # Return loaded model and empty history
+        return agent, gnn, {'rewards': [], 'loss': []}
+
+    print(f"Starting Training ({num_episodes} Episodes)...")
     
     history = {'rewards': [], 'loss': []}
     
+    # if num_episodes < 1000: num_episodes = 1000 # Removed constraint
+
     for episode in range(1, num_episodes + 1):
+        # ... (Loop content is same, just need to preserve indentation)
+        # Wait, I cannot use replace_file_content to wrap the loop easily without re-writing it.
+        # I will use the loop structure as is, but wrapped in a check?
+        # No, 'return' above handles the skip.
+        
         # Random time offset
         t = random.uniform(0, 6000) 
         dynamic_graph = constellation.get_dynamic_graph(t)
@@ -108,10 +134,6 @@ def train(num_episodes=500, progress_callback=None):
             # Filter active (should be done by dynamic_graph already)
             
             if not neighbors:
-                # Dead end
-                # Need dummy inputs for update? No, just penalty and break
-                # Actually, standard DQN needs active 'state' to update 'prev state'.
-                # But here we do 1-step updates.
                 break
             
             # Prepare Link Features for all neighbors
@@ -125,8 +147,11 @@ def train(num_episodes=500, progress_callback=None):
                 f4_act = 1.0 # This packet is trying to use it
                 f5_pad = 0.0
                 
-                # Tensor [5]
-                lf = torch.tensor([f1_avail, f2_occ, f3_bet, f4_act, f5_pad], dtype=torch.float32)
+                # Tensor [5] -> Pad to [20] (n=20)
+                lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, f4_act, f5_pad], dtype=torch.float32)
+                padding = torch.zeros(15, dtype=torch.float32)
+                lf = torch.cat([lf_base, padding])
+                
                 link_feats_dict[n] = lf
             
             action = agent.select_action(neighbors, embeddings, current, dst, link_feats_dict)
@@ -134,20 +159,32 @@ def train(num_episodes=500, progress_callback=None):
             # 3. Take Step
             next_node = action
             
-            # Reward (QoS Aware)
-            # Base: -0.1 per hop
-            # Congestion Penalty: -1.0 * (Occupied %)
+            # Reward Parameters: alpha1=0.9, alpha2=0.9, lambda=1
+            # R = alpha1 * (Throughput/Avail) - alpha2 * (Delay/Hop) - lambda * (Loss)
+            # Assuming: Throughput factor = (1 - congestion)
+            #           Delay factor = 1 (per hop cost)
+            #           Loss factor = 1 if congested else 0
+            
             attrs = dynamic_graph.edges[current, next_node]
             congestion = attrs['bw_occupied'] / attrs['bw_total']
             
-            step_penalty = -0.1
-            cong_penalty = -2.0 * congestion # Heavy penalty for congestion
+            alpha1 = 0.9
+            alpha2 = 0.9
+            lam = 1.0
+            
+            # Reward Components
+            r_throughput = (1.0 - congestion) # Higher is better
+            r_delay = 0.1 # Constant cost per hop? Or normalized delay?
+            r_loss = 1.0 if congestion > 0.9 else 0.0 # High risk if full
+            
+            # Paper Reward Structure (Inferred):
+            # Reward = alpha1 * T - alpha2 * D - lambda * L
+            reward = (alpha1 * r_throughput) - (alpha2 * r_delay) - (lam * r_loss)
             
             if next_node == dst:
-                reward = 20.0
+                reward += 10.0 # Success Bonus (independent of paper parameters, needed for convergence)
                 done = True
             else:
-                reward = step_penalty + cong_penalty
                 done = False
             
             # Update Agent
@@ -171,6 +208,7 @@ def train(num_episodes=500, progress_callback=None):
                             n_attrs['betweenness'],
                             1.0, 0.0
                         ], dtype=torch.float32)
+                        n_lf = torch.cat([n_lf, torch.zeros(15, dtype=torch.float32)])
                         
                         q = agent.q_network(next_embeddings[next_node], next_embeddings[n_n], next_embeddings[dst], n_lf).item()
                         if q > max_q:
@@ -196,7 +234,15 @@ def train(num_episodes=500, progress_callback=None):
         elif episode % 10 == 0:
             print(f"Episode {episode}, Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
 
-    print("Training Finished.")
+    print("Training Finished. Saving model...")
+    torch.save({
+        'agent_state_dict': agent.q_network.state_dict(),
+        'optimizer_state_dict': agent.optimizer.state_dict(),
+        'gnn_state_dict': gnn.state_dict(),
+        'epsilon': agent.epsilon
+    }, model_path)
+    print(f"Model saved to {model_path}")
+    
     return agent, gnn, history
 
 if __name__ == "__main__":

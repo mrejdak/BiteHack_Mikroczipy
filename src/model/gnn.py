@@ -21,12 +21,26 @@ class GCNLayer(nn.Module):
         return F.relu(out)
 
 class GNNEncoder(nn.Module):
-    def __init__(self, num_features, hidden_dim, output_dim):
+    def __init__(self, num_features, hidden_dim, output_dim, num_layers=2):
         super(GNNEncoder, self).__init__()
-        self.layer1 = GCNLayer(num_features, hidden_dim)
-        self.layer2 = GCNLayer(hidden_dim, output_dim)
+        self.num_layers = num_layers
+        self.layers = nn.ModuleList()
+        
+        # Input Layer
+        self.layers.append(GCNLayer(num_features, hidden_dim))
+        
+        # Hidden Layers
+        for _ in range(num_layers - 2):
+            self.layers.append(GCNLayer(hidden_dim, hidden_dim))
+            
+        # Output Layer (if K >= 2)
+        if num_layers >= 2:
+            self.layers.append(GCNLayer(hidden_dim, output_dim))
+        else:
+            # If K=1, just input to output? Handle edge case manually or force K>=2
+            pass
 
     def forward(self, x, adj):
-        x = self.layer1(x, adj)
-        x = self.layer2(x, adj)
+        for layer in self.layers:
+            x = layer(x, adj)
         return x

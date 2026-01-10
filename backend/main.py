@@ -101,14 +101,27 @@ def get_state():
     t = sim_state.get_current_logical_time()
     
     # 1. Dynamic Topology (Traffic + LoS)
-    dynamic_graph = sim_state.constellation.get_dynamic_graph(t)
+    try:
+        dynamic_graph = sim_state.constellation.get_dynamic_graph(t)
+    except Exception as e:
+        print(f"Error getting dynamic graph: {e}")
+        # Fallback to static graph if LoS fails
+        dynamic_graph = sim_state.constellation.graph
     
     # Update AI Logic using this graph
     if not sim_state.is_paused:
-         sim_state.update_path_with_graph(t, dynamic_graph) # Modified helper to avoid re-calc
+        try:
+             sim_state.update_path_with_graph(t, dynamic_graph)
+        except Exception as e:
+            print(f"Error in AI Path update: {e}")
+            # Ensure path is empty if failed
+            sim_state.ai_path = []
 
     sats = []
     edges = []
+    
+    # DEBUG: Check if we have satellites
+    # print(f"DEBUG: Satellites count: {len(sim_state.constellation.satellites)}")
     
     # 2. Edges from Dynamic Graph (LoS verified)
     for u, v in dynamic_graph.edges():
@@ -203,7 +216,12 @@ def calculate_ai_path(src, dst, dynamic_graph):
             f1_avail = (attrs['bw_total'] - attrs['bw_occupied']) / attrs['bw_total']
             f2_occ = attrs['bw_occupied'] / attrs['bw_total']
             f3_bet = attrs['betweenness']
-            lf = torch.tensor([f1_avail, f2_occ, f3_bet, 1.0, 0.0], dtype=torch.float32)
+            
+            # Pad to 20 dims (n=20)
+            lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, 1.0, 0.0], dtype=torch.float32)
+            padding = torch.zeros(15, dtype=torch.float32)
+            lf = torch.cat([lf_base, padding])
+            
             link_feats_dict[n] = lf
 
         # Select Action (Greedy)
@@ -406,7 +424,29 @@ class TrainingManager:
         self.thread.start()
         return True
 
+    def load_saved_model(self):
+        # Helper to load model if exists (without running train)
+        import os
+        model_path = "model.pth"
+        if os.path.exists(model_path):
+            print("Found saved model. Loading...")
+            try:
+                from src.train import train
+                # train() checks for existence and returns loaded model
+                agent, gnn, _ = train(num_episodes=0) 
+                self.agent = agent
+                self.gnn = gnn
+                self.get_features_fn = lambda c: torch.eye(len(c.satellites)) # Placeholder if import fails
+                # Re-import proper feature fn
+                from src.train import get_node_features
+                self.get_features_fn = get_node_features
+                print("Model loaded into TrainingManager.")
+            except Exception as e:
+                print(f"Failed to load model: {e}")
+
 training_mgr = TrainingManager()
+# Attempt load on startup
+training_mgr.load_saved_model()
 
 @app.post("/training/start")
 def start_training():
