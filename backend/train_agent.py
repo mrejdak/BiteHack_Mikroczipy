@@ -36,9 +36,9 @@ def train():
         name_prefix='janitor_model'
     )
     
-    print("Starting Training (Target: 100,000 steps)...")
+    print("Starting Training (Target: 20,000 steps)...")
     # In a real Hackathon you'd run this for much longer or parallelize
-    model.learn(total_timesteps=100_000, callback=checkpoint_callback)
+    model.learn(total_timesteps=20_000, callback=checkpoint_callback)
     
     print("Training Complete. Saving Final Model...")
     os.makedirs("models", exist_ok=True)

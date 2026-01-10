@@ -9,7 +9,7 @@ from .physics_engine import PhysicsEngine, OrbitalBody, G, M_EARTH, R_EARTH
 class OrbitalJanitorEnv(gym.Env):
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, num_debris=5, max_steps=1000):
+    def __init__(self, num_debris=5, max_steps=2000):
         super(OrbitalJanitorEnv, self).__init__()
         
         self.num_debris = num_debris
@@ -32,7 +32,7 @@ class OrbitalJanitorEnv(gym.Env):
 
         # Action Space: Continuous Thrust [Fx, Fy, Fz]
         # Range [-1, 1], scaled to max_thrust
-        self.max_thrust = 1000.0 # Newtons (Reduced for precision)
+        self.max_thrust = 5000.0 # Newtons (Increased for long-range maneuvers)
         self.action_space = spaces.Box(
             low=-1.0, high=1.0, shape=(3,), dtype=np.float32
         )
@@ -83,14 +83,14 @@ class OrbitalJanitorEnv(gym.Env):
         # In Hill's frame, we just offset position and velocity slightly
         # But we need to convert that back to inertial for the engine
         
-        # Curriculum: Start VERY close for tutorial mode (200m - 1000m)
-        dist_offset = np.random.uniform(200, 1000) 
+        # Realistic distances: 5km - 50km (matches deployment)
+        dist_offset = np.random.uniform(5000, 50000) 
         pos_offset = np.random.randn(3)
         pos_offset /= np.linalg.norm(pos_offset)
         pos_offset *= dist_offset
         
-        # Velocity offset: Small drift (0.1 to 2 m/s)
-        vel_offset = np.random.randn(3) * np.random.uniform(0.1, 2.0)
+        # Velocity offset: Larger drift for realistic scenarios (1 to 10 m/s)
+        vel_offset = np.random.randn(3) * np.random.uniform(1.0, 10.0)
         
         debris = OrbitalBody(
             id="target_debris",
@@ -112,13 +112,13 @@ class OrbitalJanitorEnv(gym.Env):
         if not rel_state or not agent:
              return np.zeros(7).astype(np.float32)
 
-        # Normalize Inputs
-        # Pos: Divide by 1km (so 1000m = 1.0) - More sensitive now
-        # Vel: Divide by 10m/s (so 10m/s = 1.0)
+        # Normalize Inputs for LONG-RANGE operation
+        # Pos: Divide by 50km (so 50000m = 1.0)
+        # Vel: Divide by 100m/s (so 100m/s = 1.0) 
         # Fuel: Divide by 1000
         
-        dr = rel_state['dr'] / 1000.0 
-        dv = rel_state['dv'] / 10.0
+        dr = rel_state['dr'] / 50000.0 
+        dv = rel_state['dv'] / 100.0
         fuel = agent.fuel / 1000.0
         
         return np.concatenate([dr, dv, [fuel]]).astype(np.float32)
@@ -186,15 +186,15 @@ class OrbitalJanitorEnv(gym.Env):
         reward -= 0.1 * dv_mag
         
         # 2e. Terminal Success
-        # Capture: Dist < 20m AND Relative Vel < 2 m/s
-        if dist < 20.0:
-            if dv_mag < 2.0:
+        # Capture: Dist < 100m AND Relative Vel < 5 m/s (more forgiving for long-range)
+        if dist < 100.0:
+            if dv_mag < 5.0:
                 reward += 1000.0
                 print(f"Captured! Dist: {dist:.2f}, dV: {dv_mag:.2f}")
                 terminated = True
             else:
                 # Close but too fast! Crash risk!
-                reward -= 10.0 # Warning penalty
+                reward -= 5.0 # Warning penalty
         
         # 2f. Crash/Lost
         if dist > 20000.0: # Lost track (>20km)

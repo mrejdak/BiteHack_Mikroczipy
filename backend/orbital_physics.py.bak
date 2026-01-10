@@ -1,0 +1,25 @@
+from poliastro.twobody import Orbit
+from poliastro.bodies import Earth
+from astropy import units as u
+import numpy as np
+
+# Scale: 1 Ursina Unit = 1000 km
+SCALE_FACTOR = 1 / 1000.0 
+
+def create_orbit(alt_km=400, inc_deg=51.6, ecc=0.0):
+    """
+    Creates a circular orbit around Earth.
+    """
+    return Orbit.circular(Earth, alt=alt_km * u.km, inc=inc_deg * u.deg)
+
+def get_position(orbit, time_offset_seconds):
+    """
+    Propagates the orbit by `time_offset_seconds` and returns the (x, y, z) position in km.
+    """
+    tof = time_offset_seconds * u.s
+    # Propagate gives a new Orbit object at the new time
+    new_orbit = orbit.propagate(tof)
+    
+    # Extract radius vector (x, y, z) with astropy units
+    r_vec = new_orbit.r.to(u.km).value
+    return r_vec
