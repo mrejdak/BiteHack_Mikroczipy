@@ -13,11 +13,14 @@ class OSMService:
         """
         # Overpass QL query
         # Looking for factories, industrial buildings, warehouses, etc.
+        # Improved Overpass QL query using regex for building types
+        # Also including relations (rel), common for large complexes.
         query = f"""
         [out:json];
         (
-          way["building"="industrial"](around:{radius},{lat},{lon});
-          way["building"="warehouse"](around:{radius},{lat},{lon});
+          node["building"~"industrial|warehouse|hangar|storage|factory|retail|commercial|office"](around:{radius},{lat},{lon});
+          way["building"~"industrial|warehouse|hangar|storage|factory|retail|commercial|office"](around:{radius},{lat},{lon});
+          rel["building"~"industrial|warehouse|hangar|storage|factory|retail|commercial|office"](around:{radius},{lat},{lon});
           way["man_made"="works"](around:{radius},{lat},{lon});
           node["man_made"="works"](around:{radius},{lat},{lon});
         );
@@ -31,31 +34,38 @@ class OSMService:
             # overpy is synchronous
             result = await asyncio.to_thread(self.api.query, query)
             
+            print(f"OSM Results: {len(result.ways)} ways, {len(result.nodes)} nodes, {len(result.relations)} relations found.")
+            
             infrastructure = []
             
-            for way in result.ways:
-                name = way.tags.get("name", "Unknown Facility")
-                building_type = way.tags.get("building", way.tags.get("man_made", "Unknown Type"))
-                operator = way.tags.get("operator", None)
+            # Helper to extract from elements
+            def process_element(element):
+                name = element.tags.get("name", None)
+                building_type = element.tags.get("building", element.tags.get("man_made", "Unknown"))
+                operator = element.tags.get("operator", None)
+                address = element.tags.get("addr:street", None)
                 
-                # Simple extraction
-                inf = InfrastructureData(
-                    name=name,
+                # If we don't have a name, maybe we can use the building type as a fallback name
+                display_name = name if name else f"{building_type.capitalize()} Building"
+                
+                return InfrastructureData(
+                    name=display_name,
                     type=building_type,
                     operator=operator,
-                    address=way.tags.get("addr:street", None)
+                    address=address
                 )
-                infrastructure.append(inf)
+
+            for way in result.ways:
+                infrastructure.append(process_element(way))
 
             for node in result.nodes:
-                # Deduplicate if needed, but for now just add
-                name = node.tags.get("name", "Unknown Facility")
-                inf = InfrastructureData(
-                    name=name,
-                    type=node.tags.get("man_made", "Unknown Node"),
-                    operator=node.tags.get("operator", None)
-                )
-                infrastructure.append(inf)
+                # Often nodes don't have tags if they are just parts of ways, 
+                # but if they have building/man_made tags they are standalone.
+                if "building" in node.tags or "man_made" in node.tags or "name" in node.tags:
+                    infrastructure.append(process_element(node))
+
+            for rel in result.relations:
+                infrastructure.append(process_element(rel))
                 
             return infrastructure
 

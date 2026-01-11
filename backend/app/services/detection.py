@@ -21,8 +21,10 @@ class DetectionService:
         
         # Coordinates near a known industrial area in Warsaw (for OSM testing)
         # Example: Siekierki Power Station area roughly 52.19, 21.08
-        mock_lat = 52.195 + (random.random() * 0.01 - 0.005)
-        mock_lon = 21.085 + (random.random() * 0.01 - 0.005)
+        # mock_lat = 52.195 + (random.random() * 0.01 - 0.005)
+        # mock_lon = 21.085 + (random.random() * 0.01 - 0.005)
+        mock_lat = 52.228592
+        mock_lon = 20.984501
 
         timestamp = datetime.now().isoformat()
 
