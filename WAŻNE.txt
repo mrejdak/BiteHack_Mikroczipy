@@ -1,0 +1,5 @@
+Link do repo:
+https://github.com/mrejdak/BiteHack_Mikroczipy
+Aktywne branche
+- radek - kod gnn wraz z wizualizacją
+- pozary - kod wykrywania pożarów z obrazów z satelit
