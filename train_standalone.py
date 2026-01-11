@@ -16,7 +16,7 @@ def main():
         
     # 2. Run Training
     print("Starting standalone training (400 Epochs)...")
-    agent, gnn, history = train(num_episodes=400)
+    agent, gnn, history = train(num_episodes=10)
     
     # 3. Validation
     if os.path.exists(model_file):

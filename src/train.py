@@ -3,57 +3,24 @@ import torch.optim as optim
 import random
 import networkx as nx
 import numpy as np
+from itertools import islice
 from src.simulation.sky import Constellation
 from src.model.agent import DRLAgent
 from src.model.gnn import GNNEncoder
+from src.common import get_node_features, get_adj_from_graph, calculate_reward, get_k_shortest_paths, apply_request_to_graph
 
-def get_node_features(constellation):
-    # Determine features: [1, 0] for active, [0, 1] for inactive ?
-    # Or just [Load, Is_Active]
-    # For now, let's just use constant features to learn structure
-    num_nodes = len(constellation.satellites)
-    features = torch.eye(num_nodes) # One-hot encoding for node ID as feature?
-    # Or better: random embeddings or just simple status features.
-    # GRouting uses: [buffer_occupancy, processing_delay, is_active]
-    
-    feats = []
-    for sat_id in range(num_nodes):
-        sat = constellation.satellites[sat_id]
-        f = [
-            0.0, # sat.load (Not implemented on node yet)
-            1.0 if sat.is_active else 0.0
-        ]
-        feats.append(f)
-    
-    return torch.tensor(feats, dtype=torch.float32)
 
-def get_adjacency_matrix(constellation):
-    # Returns normalized adjacency matrix
-    graph = constellation.graph
-    num_nodes = len(constellation.satellites)
-    adj = torch.zeros((num_nodes, num_nodes))
-    for u, v in graph.edges():
-        adj[u, v] = 1.0
-        # Undirected or Directed? Paper says directed graph.
-    
-    # Add self-loops
-    adj = adj + torch.eye(num_nodes)
-    
-    # Normalize (Row-normalize)
-    row_sum = adj.sum(dim=1, keepdim=True)
-    row_sum[row_sum == 0] = 1 # Avoid div by zero
-    adj = adj / row_sum
-    
-    return adj
-
-def train(num_episodes=400, progress_callback=None):
-    num_orbits = 4
-    num_sats = 20
+# ... (New helpers were defined at bottom of previous replacement, need to ensure order)
+# Actually, python functions must be defined before use? No, inside function body is fine.
+# But 'train' function uses 'Constellation'.
+def train(num_episodes=300, progress_callback=None):
+    num_orbits = 8
+    num_sats = 10
     constellation = Constellation(num_orbits, num_sats)
     total_sats = num_orbits * num_sats
     
-    # Features: Load, Active
-    feature_dim = 2 
+    # Features: Load, Active + Padding to 5 as per user request/paper default
+    feature_dim = 5 
     hidden_dim = 32
     embedding_dim = 32
     
@@ -111,7 +78,7 @@ def train(num_episodes=400, progress_callback=None):
         current = src
         path = [current]
         
-        max_hops = 30
+        max_hops = 41
         total_reward = 0
         
         for step in range(max_hops):
@@ -127,145 +94,148 @@ def train(num_episodes=400, progress_callback=None):
             embeddings = gnn(feats, adj)
             
             # 2. Neighbors & Link Features
-            if current in dynamic_graph:
-                neighbors = list(dynamic_graph.successors(current))
-            else:
-                neighbors = []
-            
-            # Filter active (should be done by dynamic_graph already)
-            
-            if not neighbors:
-                break
-            
-            # Prepare Link Features for all neighbors
-            link_feats_dict = {}
-            for n in neighbors:
-                # Get edge attrs
-                attrs = dynamic_graph.edges[current, n]
-                f1_avail = (attrs['bw_total'] - attrs['bw_occupied']) / attrs['bw_total']
-                f2_occ = attrs['bw_occupied'] / attrs['bw_total']
-                f3_bet = attrs['betweenness']
-                f4_act = 1.0 
-                # f5: Normalized Distance (using stored attribute if available, else calc)
-                dist = attrs.get('distance', 1000.0)
-                f5_dist = dist / 5000.0
-                
-                # Tensor [5] -> Pad to [20]
-                lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, f4_act, f5_dist], dtype=torch.float32)
-                padding = torch.zeros(15, dtype=torch.float32)
-                lf = torch.cat([lf_base, padding])
-                
-                link_feats_dict[n] = lf
-            
-            action = agent.select_action(neighbors, embeddings, current, dst, link_feats_dict)
-            
-            # 3. Take Step
-            next_node = action
-            
-            # --- Calculate Distances for Reward ---
-            pos_curr = constellation.satellites[current].get_position(t)
-            pos_next = constellation.satellites[next_node].get_position(t)
-            pos_dst = constellation.satellites[dst].get_position(t)
-            
-            dist_curr_dest = np.linalg.norm(pos_curr - pos_dst)
-            dist_next_dest = np.linalg.norm(pos_next - pos_dst)
-            dist_link = np.linalg.norm(pos_curr - pos_next)
-            
-            # Distance Heuristic (Potential Field)
-            progress = (dist_curr_dest - dist_next_dest) / 5000.0
-            
-            attrs = dynamic_graph.edges[current, next_node]
-            congestion = attrs['bw_occupied'] / attrs['bw_total']
-            
-            # Paper Params + User Request
-            alpha1 = 0.9
-            alpha2 = 0.9
-            lam = 1.0
-            
-            # Reward Components
-            r_throughput = (1.0 - congestion) 
-            
-            # 2. Delay/Distance (Minimize): 
-            # Cost = Normalized Link Distance + Fixed Hop Cost (User Request)
-            hop_cost = 0.5
-            dist_cost = dist_link / 5000.0
-            r_delay = dist_cost + hop_cost
-            
-            # 3. Packet Loss (Minimize)
-            r_loss = 1.0 if congestion > 0.9 else 0.0
-            
-            # Base Reward from GRouting
-            step_reward = (alpha1 * r_throughput) - (alpha2 * r_delay) - (lam * r_loss)
-            
-            # Add Shaping to ensure finding route
-            reward = step_reward + (progress * 2.0) # Stronger weight on progress
-            
-            if next_node == dst:
-                reward += 200.0 # Huge Success Bonus to override any accumulated costs
-                done = True
-            else:
-                done = False
-                # Penalize loops/stuck
-                if next_node in path:
-                    reward -= 5.0 # Penalty for visiting visited node
-            
-            # Update Agent
-            with torch.no_grad():
-                next_embeddings = gnn(feats, adj) 
-                
-                if next_node in dynamic_graph:
-                    next_neighbors = list(dynamic_graph.successors(next_node))
-                else:
-                    next_neighbors = []
-                    
-                max_q = 0
-                if next_neighbors:
-                    max_q = -float('inf')
-                    for n_n in next_neighbors:
-                        # Next Link Features
-                        n_attrs = dynamic_graph.edges[next_node, n_n]
-                        n_lf = torch.tensor([
-                            (n_attrs['bw_total'] - n_attrs['bw_occupied']) / n_attrs['bw_total'],
-                            n_attrs['bw_occupied'] / n_attrs['bw_total'],
-                            n_attrs['betweenness'],
-                            1.0, 0.0
-                        ], dtype=torch.float32)
-                        n_lf = torch.cat([n_lf, torch.zeros(15, dtype=torch.float32)])
-                        
-                        q = agent.q_network(next_embeddings[next_node], next_embeddings[n_n], next_embeddings[dst], n_lf).item()
-                        if q > max_q:
-                            max_q = q
-                    if max_q == -float('inf'): max_q = 0
-            
-            # Current link features used for action
-            curr_lf = link_feats_dict[action]
-            agent.update(embeddings[current], embeddings[action], embeddings[dst], curr_lf, reward, max_q)
-            
-            current = next_node
-            path.append(current)
-            total_reward += reward
-            
-            if done:
-                break
-        
-        agent.decay_epsilon()
-        history['rewards'].append(total_reward)
-        
-        if progress_callback:
-            progress_callback(episode, total_reward, agent.epsilon)
-        elif episode % 10 == 0:
-            print(f"Episode {episode}, Reward: {total_reward:.2f}, Epsilon: {agent.epsilon:.2f}")
+    # Algorithm 2
+    
+    # 1. Init Env
+    # Use 6x10 or 4x20? User had 4x20 (80 sats).
+    # Paper used Iridium (66).
+    constellation = Constellation(num_orbits=4, num_sats_per_orbit=20)
+    
+    # Init Features
+    agent = DRLAgent(embedding_dim=32, hidden_dim=64, buffer_size=3000) # Params from paper/impl plan
+    gnn = GNNEncoder(num_features=5, hidden_dim=32, output_dim=32, num_layers=3) # K=3 GNN iters? Paper says K=12!
+    # User config says K=12 in parameters table.
+    # Adjust:
+    gnn = GNNEncoder(num_features=5, hidden_dim=32, output_dim=32, num_layers=12)
+    
+    optimizer_gnn = optim.Adam(gnn.parameters(), lr=0.0001)
 
-    print("Training Finished. Saving model...")
+    # Training Stats
+    history_rewards = []
+    
+    # Episode Loop (Request Sequence)
+    # How many requests per episode? "Episode ends when (4) is not satisfied" -> Blocking.
+    # Let's cap at max requests to avoid infinite.
+    max_requests = 100 
+    
+    for episode in range(num_episodes):
+        # Reset Graph Load (Base load only)
+        # We need a fresh constellation or clear BW
+        # constellation.__init__? No, just reset BW.
+        for u, v in constellation.graph.edges():
+            constellation.graph.edges[u, v]['bw_occupied'] = 0.0 # Clear dynamic allocs
+            constellation.graph.edges[u, v]['distance'] = 1000.0 # Default
+        
+        # Base Traffic? Paper: "Initial BW for every link is 200". 
+        # "Occupied BW will not be freed until episode ends".
+        
+        episode_reward = 0
+        done = False
+        req_count = 0
+        
+        while not done and req_count < max_requests:
+            req_count += 1
+            
+            # Generate Request (Random Src/Dst/Bw)
+            nodes = list(constellation.graph.nodes())
+            src, dst = random.sample(nodes, 2)
+            bw_demand = random.choice([16, 32, 64]) # From paper
+            
+            # 1. K-Paths
+            paths = get_k_shortest_paths(constellation.graph, src, dst, k=5)
+            
+            if not paths:
+                done = True # Blocking (No Connectivity)
+                continue
+                
+            # 2. Evaluate Candidates
+            k_qvalues = {} # idx -> val
+            k_graphs = {}  # idx -> G'
+            k_embs = {}    # idx -> GraphEmb
+            
+            for i, path in enumerate(paths):
+                # Apply req to get s'
+                G_prime, success = apply_request_to_graph(constellation.graph, path, bw_demand)
+                
+                if not success:
+                    k_qvalues[i] = -100.0 # Invalid
+                    continue
+                    
+                # GNN Propagate
+                # Need features tensor
+                # We need a helper to extract features from G_prime
+                nodes = list(G_prime.nodes())
+                feats_tensor = get_node_features(constellation) # Use base features? Or assume G_prime has load?
+                # GRouting uses Link State in LineGraph.
+                # Here we stick to Node GCN.
+                
+                # We need Adjacency from G_prime (with new weights)
+                adj = get_adj_from_graph(G_prime, len(nodes))
+                
+                # Forward
+                _, graph_emb = gnn(feats_tensor, adj)
+                
+                # Eval Q
+                q = agent.eval_net(graph_emb)
+                
+                k_qvalues[i] = q.item()
+                k_graphs[i] = G_prime
+                k_embs[i] = graph_emb
+            
+            # 3. Choose Action
+            # Filter out invalid (-100)
+            valid_indices = {i: v for i, v in k_qvalues.items() if v > -99}
+            
+            if not valid_indices:
+                done = True # Blocking (All K paths full)
+                # reward = -10 # Blocking Penalty
+                # break
+                continue # Skip to next request? Or end episode? "Episode ends when blocking".
+            
+            action_idx = agent.select_action(valid_indices)
+            
+            # Execute
+            chosen_path = paths[action_idx]
+            chosen_graph = k_graphs[action_idx]
+            chosen_emb = k_embs[action_idx]
+            
+            # Update Main Graph
+            for u, v in chosen_graph.edges():
+                if chosen_graph.has_edge(u, v):
+                     constellation.graph.edges[u, v]['bw_occupied'] = chosen_graph.edges[u, v]['bw_occupied']
+            
+            # Reward
+            reward = calculate_reward(chosen_graph, chosen_path) 
+            episode_reward += reward
+            
+            # 4. Next Step Forecast (Visual Target)
+            next_val = agent.get_target_value(chosen_emb).item()
+            
+            agent.memory.push(chosen_emb, reward, next_val, False)
+            
+            # Train Agent
+            loss = agent.update()
+            
+            agent.decay_epsilon()
+            
+        print(f"Episode {episode} Finished. Requests: {req_count}, Reward: {episode_reward:.2f}")
+
+    # Save Model
+    print(f"Saving model to {model_path}...")
     torch.save({
         'agent_state_dict': agent.q_network.state_dict(),
         'optimizer_state_dict': agent.optimizer.state_dict(),
         'gnn_state_dict': gnn.state_dict(),
         'epsilon': agent.epsilon
     }, model_path)
-    print(f"Model saved to {model_path}")
-    
-    return agent, gnn, history
+    print("Model saved successfully.")
+
+    return agent, gnn, history_rewards
+
+
 
 if __name__ == "__main__":
     train()
+
+
+

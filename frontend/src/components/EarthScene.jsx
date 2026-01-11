@@ -135,18 +135,6 @@ function Connections({ edges, satellites, activePath, aiPath, brokenNodes, isPau
         </React.Fragment>
       ))}
 
-      {/* AI Path - Magenta Neon (under optimal) */}
-      {aiPathEdges.map((points, i) => (
-        <Line
-          key={`aipath-${i}`}
-          points={points}
-          color="#ff00ff"
-          lineWidth={4}
-          depthTest={false} // Ensure it draws ON TOP of grid
-          renderOrder={1}
-        />
-      ))}
-
       {/* Optimal Path - Thick Lime Neon */}
       {pathEdges.map((points, i) => (
         <Line
@@ -154,7 +142,19 @@ function Connections({ edges, satellites, activePath, aiPath, brokenNodes, isPau
           points={points}
           color="#00ff00"
           lineWidth={5}
-          depthTest={false} // Draw on top
+          depthTest={false}
+          renderOrder={1}
+        />
+      ))}
+
+      {/* AI Path - Magenta Neon (on top) */}
+      {aiPathEdges.map((points, i) => (
+        <Line
+          key={`aipath-${i}`}
+          points={points}
+          color="#ff00ff"
+          lineWidth={4}
+          depthTest={false} // Ensure it draws ON TOP of grid (and optimal path due to renderOrder)
           renderOrder={2}
         />
       ))}

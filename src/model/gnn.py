@@ -16,7 +16,7 @@ class GCNLayer(nn.Module):
         
         # Message passing (Aggregation)
         # simplistic: out = adj * out
-        out = torch.spmm(adj, out)
+        out = torch.mm(adj, out)
         
         return F.relu(out)
 
@@ -40,7 +40,32 @@ class GNNEncoder(nn.Module):
             # If K=1, just input to output? Handle edge case manually or force K>=2
             pass
 
+        # Readout Function (Algorithm 1 Line 9: R({h_K}))
+        # 3-Layer MLP as per paper
+        # Paper sizes: (4240, 2048, 1024) - Scaled down for our size?
+        # N=100 nodes * 32 dim = 3200 flattened input?
+        # Or readout per node then sum?
+        # Paper says: "readout function is approximated by a three-layer FC NN".
+        # Input to readout is SET of node embeddings defined by {h_K}.
+        # Pytorch Geometric usually does Global Pooling (Sum/Mean) then MLP.
+        # Let's do: Global Mean Pooling -> MLP.
+        
+        self.readout_fc1 = nn.Linear(output_dim, 256)
+        self.readout_fc2 = nn.Linear(256, 128)
+        self.readout_fc3 = nn.Linear(128, 64) # Graph Vector Size
+
     def forward(self, x, adj):
         for layer in self.layers:
             x = layer(x, adj)
-        return x
+            
+        # x is now [N, output_dim]
+        # Readout: Global Pooling + MLP
+        # 1. Global Mean Pooling
+        graph_embedding = torch.mean(x, dim=0) # [output_dim]
+        
+        # 2. MLP
+        g = F.relu(self.readout_fc1(graph_embedding))
+        g = F.relu(self.readout_fc2(g))
+        g = self.readout_fc3(g)
+        
+        return x, g # Return both Node Embeddings (for compatibility) and Graph Embedding

@@ -11,6 +11,7 @@ import asyncio
 # We need to make sure src is in python path or we move this file to root and adjust imports
 # For now, let's assume we run uvicorn from root.
 from src.simulation.sky import Constellation
+from src.common import get_node_features, get_adj_from_graph, apply_request_to_graph
 
 app = FastAPI()
 
@@ -164,85 +165,83 @@ class SimulationResponse(BaseModel):
 # --- Endpoints ---
 
 # --- Helper for AI Path Inference ---
+
 def calculate_ai_path(src, dst, dynamic_graph):
-    # Uses global training_mgr.agent (if available)
-    # Be careful about thread safety if training is running!
-    # Ideally use a snapshot/copy of the model.
-
-    # Only if trained
-    # We need access to internal objects (agent, gnn) which are inside the training loop closure in src/train?
-    # NO, src/train returns them.
-    # We need to store them in TrainingManager.
-
     if training_mgr.agent is None:
         return []
 
-    path = [src]
-    current = src
-    max_hops = 30
-
     # Shared objects
-    constellation = sim_state.constellation # Static features
     agent = training_mgr.agent
     gnn = training_mgr.gnn
+    
+    get_features_fn = get_node_features # Use common directly
 
-    # 1. Embeddings
-    num_nodes = len(constellation.satellites)
-    adj = torch.eye(num_nodes)
-    for u, v in dynamic_graph.edges():
-        adj[u, v] = 1.0
-    row_sum = adj.sum(dim=1, keepdim=True); row_sum[row_sum==0]=1; adj=adj/row_sum
+    # 1. K-Paths
+    from itertools import islice
+    try:
+        gen = nx.shortest_simple_paths(dynamic_graph, src, dst)
+        paths = list(islice(gen, 5))
+    except (nx.NetworkXNoPath, nx.NodeNotFound):
+        return []
+        
+    if not paths:
+        return []
+        
+    # 2. Evaluate
+    k_qvalues = {}
+    
+    # Use sim_state.constellation.graph (Full) as base, and overlay dynamic loads
+    # because get_adj_from_graph expects full graph usually, or at least consistent indices with features
+    full_G = sim_state.constellation.graph
+    
+    # Actually, the logic in train.py loops over dynamic_graph for A matrix.
+    # In Backend, dynamic_graph might have filtered edges (LoS).
+    # But nodes should be same count (80).
+    
+    # We should use exactly what train.py uses:
+    # adj = get_adj_from_graph(dynamic_graph, len(constellation.satellites))
+    
+    # Note: `dynamic_graph` in backend/main might be missing nodes if they are fully isolated?
+    # No, get_dynamic_graph usually keeps nodes.
+    
+    # Ensure num_nodes matches GNN expectation
+    num_nodes = len(sim_state.constellation.satellites)
+    
+    adj = get_adj_from_graph(dynamic_graph, num_nodes)
+    feats = get_node_features(sim_state.constellation)
 
-    feats = training_mgr.get_features_fn(constellation)  # Need this helper available or import it
-
-    with torch.no_grad():
-        embeddings = gnn(feats, adj)
-
-    for _ in range(max_hops):
-        if current == dst:
-            break
-
-        if current not in dynamic_graph:
-            break
-
-        neighbors = list(dynamic_graph.successors(current))
-        if not neighbors:
-            break
-
-        # Link Features
-        link_feats_dict = {}
-        for n in neighbors:
-            attrs = dynamic_graph.edges[current, n]
-            f1_avail = (attrs['bw_total'] - attrs['bw_occupied']) / attrs['bw_total']
-            f2_occ = attrs['bw_occupied'] / attrs['bw_total']
-            f3_bet = attrs['betweenness']
+    # Evaluate paths
+    for i, path in enumerate(paths):
+        # We need to simulate 'next state' graph G'
+        # apply_request_to_graph returns new G'
+        
+        # Use a demand of 32 (medium) or pull from request?
+        G_prime, success = apply_request_to_graph(dynamic_graph, path, 32)
+        
+        if not success:
+            k_qvalues[i] = -100.0
+            continue
             
-            # Use stored distance if available
-            dist = attrs.get('distance', 1000.0)
-            f5_dist = dist / 5000.0
+        # Get new Adj
+        adj_prime = get_adj_from_graph(G_prime, num_nodes)
+        
+        with torch.no_grad():
+            _, g_emb = gnn(feats, adj_prime)
+            q = agent.eval_net(g_emb)
+            k_qvalues[i] = q.item()
             
-            # Pad to 20 dims (n=20)
-            lf_base = torch.tensor([f1_avail, f2_occ, f3_bet, 1.0, f5_dist], dtype=torch.float32)
-            padding = torch.zeros(15, dtype=torch.float32)
-            lf = torch.cat([lf_base, padding])
-            
-            link_feats_dict[n] = lf
+    # Select Best
+    # Filter valid
+    valid = {k: v for k, v in k_qvalues.items() if v > -99}
+    if not valid:
+        return []
 
-        # Select Action (Greedy)
-        # We need to temporarily set epsilon to 0? Or pass a flag?
-        # The agent.select_action uses self.epsilon.
-        old_eps = agent.epsilon
-        agent.epsilon = 0.0
-        action = agent.select_action(neighbors, embeddings, current, dst, link_feats_dict)
-        agent.epsilon = old_eps
-
-        if action is None:
-            break
-
-        current = action
-        path.append(current)
-
-    return path
+    old_eps = agent.epsilon
+    agent.epsilon = 0.0 # Greedy
+    best_idx = agent.select_action(valid)
+    agent.epsilon = old_eps
+    
+    return paths[best_idx]
 
 @app.get("/simulation/state")
 def get_state():
@@ -299,18 +298,12 @@ def get_state():
 @app.post("/simulation/pause")
 def pause_simulation():
     if not sim_state.is_paused:
+        # Capture time BEFORE pausing to ensure continuity
+        current_logical_time = sim_state.get_current_logical_time()
+        
         sim_state.is_paused = True
+        sim_state.paused_time = current_logical_time
         sim_state.last_pause_timestamp = time.time()
-        # Capture the exact logical time we paused at
-        # Recalculate it manually to be safe or use getter?
-        # Note: getter depends on is_paused flag.
-        # We need to compute logical time BEFORE setting flag?
-        # Actually logic in getter: if is_paused return paused_time.
-        # So we must set paused_time first.
-
-        # Re-calc current logic time
-        real_elapsed = time.time() - sim_state.start_time - sim_state.accumulated_pause_duration
-        sim_state.paused_time = real_elapsed * 50
 
     return {"status": "paused", "time": sim_state.paused_time}
 
@@ -380,9 +373,10 @@ class TrainingManager:
         
         try:
             print("DEBUG: Importing train module...")
+            print("DEBUG: Importing train module...")
             # We need to grab get_node_features
-            from src.train import get_node_features, train
-            self.get_features_fn = get_node_features
+            from src.train import train
+            # self.get_features_fn = get_node_features # Removed
             
             def callback(ep, reward, eps):
                 self.current_episode = ep
@@ -440,10 +434,11 @@ class TrainingManager:
                 agent, gnn, _ = train(num_episodes=0) 
                 self.agent = agent
                 self.gnn = gnn
-                self.get_features_fn = lambda c: torch.eye(len(c.satellites)) # Placeholder if import fails
+                self.gnn = gnn
+                # self.get_features_fn = lambda c: torch.eye(len(c.satellites)) # Placeholder if import fails
                 # Re-import proper feature fn
-                from src.train import get_node_features
-                self.get_features_fn = get_node_features
+                # from src.train import get_node_features
+                # self.get_features_fn = get_node_features
                 print("Model loaded into TrainingManager.")
             except Exception as e:
                 print(f"Failed to load model: {e}")
