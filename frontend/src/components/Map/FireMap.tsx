@@ -1,5 +1,5 @@
 import { Fragment, useState, useCallback } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet';
 import { useAlertStore } from '../../store/useAlertStore';
 import { simulateFireSpread } from '../../services/api';
 import type { FireSpreadPoint, WeatherInfo } from '../../types';
@@ -105,31 +105,64 @@ const FireMap = () => {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
 
-            {/* Render fire spread area as a single circle showing max spread distance */}
-            {spreadData && !spreadData.loading && spreadData.origin && spreadData.maxRadiusMeters > 0 && (
-                <Circle
-                    center={[spreadData.origin.lat, spreadData.origin.lon]}
-                    radius={spreadData.maxRadiusMeters}
-                    pathOptions={{
-                        color: '#ff4400',
-                        fillColor: '#ff6600',
-                        fillOpacity: 0.3,
-                        weight: 2,
-                    }}
-                />
-            )}
+            {/* Render fire spread area as a comet shape based on wind direction */}
+            {spreadData && !spreadData.loading && spreadData.origin && spreadData.maxRadiusMeters > 0 && spreadData.weather && (() => {
+                // Generate comet-shaped polygon elongated in wind direction
+                const origin = spreadData.origin;
+                const radius = spreadData.maxRadiusMeters;
+                // Wind direction is where wind comes FROM, fire spreads TOWARDS (opposite)
+                const windFromDeg = spreadData.weather.wind_direction_deg;
+                const spreadDirRad = ((windFromDeg + 180) % 360) * Math.PI / 180;
 
-            {/* Render fire alert markers */}
+                // Create comet shape: elongated ellipse in wind direction
+                const points: [number, number][] = [];
+                const numPoints = 36;
+
+                // Meters to degrees (approximate)
+                const metersToDegLat = 1 / 111320;
+                const metersToDegLon = 1 / (111320 * Math.cos(origin.lat * Math.PI / 180));
+
+                for (let i = 0; i < numPoints; i++) {
+                    const angle = (i / numPoints) * 2 * Math.PI;
+
+                    // Calculate distance from center - elongate in spread direction
+                    const angleDiff = Math.abs(angle - spreadDirRad);
+                    const normalizedDiff = Math.min(angleDiff, 2 * Math.PI - angleDiff);
+
+                    // Comet shape: long in spread direction, shorter opposite
+                    let distMultiplier = 0.5; // base size
+                    if (normalizedDiff < Math.PI / 2) {
+                        // In spread direction - elongate more
+                        distMultiplier = 0.5 + 1.5 * (1 - normalizedDiff / (Math.PI / 2));
+                    }
+
+                    const dist = radius * distMultiplier;
+
+                    const dx = dist * Math.sin(angle);
+                    const dy = dist * Math.cos(angle);
+
+                    points.push([
+                        origin.lat + dy * metersToDegLat,
+                        origin.lon + dx * metersToDegLon
+                    ]);
+                }
+
+                return (
+                    <Polygon
+                        positions={points}
+                        pathOptions={{
+                            color: '#ff4400',
+                            fillColor: '#ff6600',
+                            fillOpacity: 0.35,
+                            weight: 2,
+                        }}
+                    />
+                );
+            })()}
+
+            {/* Render fire alert markers - NO default circle */}
             {alerts.map((alert, index) => (
                 <Fragment key={index}>
-                    {/* Only show default circle if no spread simulation for this alert */}
-                    {(!spreadData || spreadData.alertIndex !== index) && (
-                        <Circle
-                            center={[alert.location.lat, alert.location.lon]}
-                            radius={1000}
-                            pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.3 }}
-                        />
-                    )}
                     <Marker position={[alert.location.lat, alert.location.lon]} icon={fireIcon}>
                         <Popup>
                             <div style={{ minWidth: '200px' }}>
