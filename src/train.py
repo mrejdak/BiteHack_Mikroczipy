@@ -97,9 +97,8 @@ def train(num_episodes=300, progress_callback=None):
     # Algorithm 2
     
     # 1. Init Env
-    # Use 6x10 or 4x20? User had 4x20 (80 sats).
-    # Paper used Iridium (66).
-    constellation = Constellation(num_orbits=4, num_sats_per_orbit=20)
+    # Use config variables
+    constellation = Constellation(num_orbits=num_orbits, num_sats_per_orbit=num_sats)
     
     # Init Features
     agent = DRLAgent(embedding_dim=32, hidden_dim=64, buffer_size=3000) # Params from paper/impl plan

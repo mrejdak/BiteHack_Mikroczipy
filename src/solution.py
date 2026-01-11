@@ -6,8 +6,8 @@ from src.viz.visualizer import Visualizer
 def run_demo():
     print("Initializing Large Constellation...")
     # Scale up!
-    num_orbits = 4
-    num_sats = 20
+    num_orbits = 8
+    num_sats = 10
     total_sats = num_orbits * num_sats
     
     constellation = Constellation(num_orbits, num_sats)
