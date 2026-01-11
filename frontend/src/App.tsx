@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import FireMap from './components/Map/FireMap';
@@ -8,12 +9,15 @@ import './index.css';
 
 function App() {
   const { setLoading, addAlerts, clearAlerts, loading } = useAlertStore();
+  const [nextImageId, setNextImageId] = useState(1);
 
   const handleMockData = async () => {
     setLoading(true);
     try {
-      // Use mock image 1
-      const response = await detectMockFire(1);
+      // Use current image ID and cycle to next
+      const response = await detectMockFire(nextImageId);
+      setNextImageId(nextImageId === 1 ? 2 : 1); // Alternate between 1 and 2
+
       if (response.fire_detected) {
         addAlerts(response.alerts);
         toast.error(`🔥 ${response.alerts.length} fire(s) detected!`, {
