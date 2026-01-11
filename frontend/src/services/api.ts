@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { DetectionResponse } from '../types';
+import type { DetectionResponse, FireSpreadResponse } from '../types';
 
 const API_URL = 'http://localhost:8000/api/v1';
 
@@ -17,5 +17,10 @@ export const detectFire = async (file: File): Promise<DetectionResponse> => {
         },
     });
 
+    return response.data;
+};
+
+export const simulateFireSpread = async (lat: number, lon: number, hours: number = 1): Promise<FireSpreadResponse> => {
+    const response = await api.post<FireSpreadResponse>('/fire/spread', { lat, lon, hours });
     return response.data;
 };
