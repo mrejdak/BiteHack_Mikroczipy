@@ -16,6 +16,7 @@ class FireAlert(BaseModel):
     infrastructure: List[InfrastructureData]
     timestamp: str
     severity: str
+    annotated_image_base64: Optional[str] = None
 
 class DetectionResponse(BaseModel):
     fire_detected: bool

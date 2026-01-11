@@ -20,7 +20,13 @@ export const detectFire = async (file: File): Promise<DetectionResponse> => {
     return response.data;
 };
 
+export const detectMockFire = async (imageId: number): Promise<DetectionResponse> => {
+    const response = await api.get<DetectionResponse>(`/detect/mock/${imageId}`);
+    return response.data;
+};
+
 export const simulateFireSpread = async (lat: number, lon: number, hours: number = 1): Promise<FireSpreadResponse> => {
     const response = await api.post<FireSpreadResponse>('/fire/spread', { lat, lon, hours });
     return response.data;
 };
+

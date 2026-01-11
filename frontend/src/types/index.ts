@@ -15,6 +15,7 @@ export interface FireAlert {
     infrastructure: InfrastructureData[];
     timestamp: string;
     severity: string;
+    annotated_image_base64?: string;
 }
 
 export interface DetectionResponse {

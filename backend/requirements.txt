@@ -8,3 +8,6 @@ overpy==0.7
 requests==2.32.5
 websockets==16.0
 httpx==0.28.1
+ultralytics
+opencv-python
+

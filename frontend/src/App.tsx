@@ -1,23 +1,19 @@
-import { useRef } from 'react';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import FireMap from './components/Map/FireMap';
 import AlertList from './components/Sidebar/AlertList';
-import { detectFire } from './services/api';
+import { detectMockFire } from './services/api';
 import { useAlertStore } from './store/useAlertStore';
 import './index.css';
 
 function App() {
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const { setLoading, addAlerts, clearAlerts, loading } = useAlertStore();
 
-  const handleUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
+  const handleMockData = async () => {
     setLoading(true);
     try {
-      const response = await detectFire(file);
+      // Use mock image 1
+      const response = await detectMockFire(1);
       if (response.fire_detected) {
         addAlerts(response.alerts);
         toast.error(`🔥 ${response.alerts.length} fire(s) detected!`, {
@@ -38,9 +34,6 @@ function App() {
       });
     } finally {
       setLoading(false);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
@@ -53,22 +46,16 @@ function App() {
           <p>Satellite Image Analysis</p>
         </header>
 
-        {/* Upload Button */}
+        {/* Mock Data Button */}
         <div className="upload-section">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleUpload}
-            style={{ display: 'none' }}
-            id="file-upload"
-          />
-          <label
-            htmlFor="file-upload"
+          <button
+            onClick={handleMockData}
+            disabled={loading}
             className={`upload-label ${loading ? 'loading' : ''}`}
+            style={{ border: 'none', width: '100%' }}
           >
-            {loading ? '⏳ Analyzing...' : '📤 Upload Satellite Image'}
-          </label>
+            {loading ? '⏳ Analyzing...' : '🛰️ Mock Satellite Data'}
+          </button>
           <button onClick={clearAlerts} className="clear-btn">
             🗑️ Clear Alerts
           </button>
@@ -91,3 +78,4 @@ function App() {
 }
 
 export default App;
+

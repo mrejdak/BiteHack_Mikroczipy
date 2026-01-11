@@ -233,7 +233,22 @@ const FireMap = () => {
                                     </button>
                                 )}
 
-                                {alert.infrastructure.length > 0 && (
+                                {/* Show annotated satellite image if available, otherwise show infrastructure */}
+                                {alert.annotated_image_base64 ? (
+                                    <div style={{ marginTop: '10px' }}>
+                                        <h4>🛰️ Detected Fire:</h4>
+                                        <img
+                                            src={`data:image/png;base64,${alert.annotated_image_base64}`}
+                                            alt="Fire detection"
+                                            style={{
+                                                width: '100%',
+                                                maxWidth: '300px',
+                                                borderRadius: '4px',
+                                                border: '2px solid #ff4400'
+                                            }}
+                                        />
+                                    </div>
+                                ) : alert.infrastructure.length > 0 && (
                                     <div style={{ marginTop: '10px' }}>
                                         <h4>Nearby Infrastructure:</h4>
                                         <ul style={{ paddingLeft: '16px', margin: 0 }}>
