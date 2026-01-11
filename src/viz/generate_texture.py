@@ -2,7 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 
-def generate_texture(width=1024, height=512, filename='earth_texture.jpg'):
+def generate_texture(width=1024, height=512, filename='earth_texture.jpeg'):
     print("Generating procedural texture...")
     # Generate random noise
     

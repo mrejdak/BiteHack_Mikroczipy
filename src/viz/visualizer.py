@@ -20,8 +20,8 @@ class Visualizer:
         # Load Texture
         try:
             # User provided specific texture
-            print(f"Attempting to load texture from: global_texture.jpg")
-            img = plt.imread('global_texture.jpg')
+            print(f"Attempting to load texture from: earth_texture.jpeg")
+            img = plt.imread('earth_texture.jpeg')
             print(f"Texture loaded successfully. Shape: {img.shape}")
             
             # Normalize if needed (jpg is 0-255)

@@ -9,7 +9,7 @@ const EARTH_RADIUS = 6.371; // Scale down: 1 unit = 1000km approx
 const SAT_SIZE = 0.07;
 
 function Earth() {
-  const texture = useLoader(THREE.TextureLoader, '/global_texture.jpg');
+  const texture = useLoader(THREE.TextureLoader, '/earth_texture.jpeg');
   return (
     <mesh rotation={[Math.PI / 2, 0, 0]}>
       <sphereGeometry args={[EARTH_RADIUS, 64, 64]} />
