@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { FireAlert } from '../types';
+import type { FireAlert } from '../types';
 
 interface AlertStore {
     alerts: FireAlert[];
