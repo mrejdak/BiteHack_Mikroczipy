@@ -21,10 +21,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from app.routers import detect
+from app.routers import detect, fire_spread
 
 app.include_router(detect.router, prefix="/api/v1", tags=["detection"])
+app.include_router(fire_spread.router, prefix="/api/v1/fire", tags=["fire-spread"])
 
 @app.get("/")
 async def root():
     return {"message": "Fire Detection API is running"}
+
