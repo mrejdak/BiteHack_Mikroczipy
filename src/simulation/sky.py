@@ -15,18 +15,30 @@ class Constellation:
         return orbit * self.num_sats_per_orbit + phase
 
     def setup_constellation(self):
-        # Walker Delta / Polar Constellation Config
-        # Inclination: near 90 for Polar
-        inclination = 86.4 
-        # Altitude
-        altitude = 780
+        # Mixed Constellation Config
+        # Shell 1: Polar (8 Orbits)
+        # Shell 2: Inclined (Remaining Orbits)
+        num_polar = 6
         
         self.visible_orbits = [] # List of list of [x,y,z]
         
         # Create Satellites
         for o in range(self.num_orbits):
-            # Right Ascension of Ascending Node (RAAN) spread over 360 degrees
-            raan = (360.0 / self.num_orbits) * o 
+            # Shell Logic
+            if o < num_polar:
+                # Shell 1: Polar
+                inclination = 86.4
+                num_in_shell = num_polar
+                eff_o = o
+                shell_id = 1
+                raan = (360.0 / num_polar) * eff_o
+            else:
+                # Shell 2: Inclined (53 deg)
+                inclination = 53.0
+                num_inclined = self.num_orbits - num_polar
+                eff_o = o - num_polar
+                shell_id = 2
+                raan = (360.0 / num_inclined) * eff_o
             
             # Use the first satellite of each orbit to trace the path
             trace_sat = None
@@ -41,21 +53,20 @@ class Constellation:
                     id=sat_id, 
                     orbit_id=o, 
                     phase_id=p, 
-                    altitude=altitude, 
+                    altitude=780, 
                     inclination=inclination, 
                     raan=raan, 
                     mean_anomaly=mean_anomaly
                 )
                 self.satellites[sat_id] = sat
-                self.graph.add_node(sat_id, orbit=o, phase=p, active=True)
+                self.graph.add_node(sat_id, orbit=o, phase=p, active=True, shell=shell_id)
                 
                 if p == 0:
                     trace_sat = sat
             
-            # Generate Trace for this Orbit Plane
+            # Generate Trace
             if trace_sat:
                 path_points = []
-                # Period is in the Orbit object (Astropy Quantity)
                 period_seconds = trace_sat.orbit.period.to(u.s).value
                 steps = 100
                 for i in range(steps + 1):
@@ -64,89 +75,110 @@ class Constellation:
                     path_points.append(pos.tolist())
                 self.visible_orbits.append(path_points)
 
-        # Establish ISLs (Grid Topology: +Grid +Polar wrap-around typically, but simplified here)
-        # Intra-orbit (UP/DOWN)
+        # Establish ISLs (Grid Topology)
+        # Intra-orbit (UP/DOWN) - Universal
         for o in range(self.num_orbits):
             for p in range(self.num_sats_per_orbit):
                 sat_id = self.get_sat_id(o, p)
                 
-                # neighbor up (next phase)
                 up_p = (p + 1) % self.num_sats_per_orbit
                 up_id = self.get_sat_id(o, up_p)
                 self.satellites[sat_id].add_neighbor('UP', up_id)
-                self.graph.add_edge(sat_id, up_id, direction='UP')
+                self.graph.add_edge(sat_id, up_id, direction='UP', type='intra')
 
-                # neighbor down (prev phase)
                 down_p = (p - 1 + self.num_sats_per_orbit) % self.num_sats_per_orbit
                 down_id = self.get_sat_id(o, down_p)
                 self.satellites[sat_id].add_neighbor('DOWN', down_id)
-                self.graph.add_edge(sat_id, down_id, direction='DOWN')
+                self.graph.add_edge(sat_id, down_id, direction='DOWN', type='intra')
 
-        # Inter-orbit (LEFT/RIGHT)
-        # Inter-orbit (LEFT/RIGHT)
+        # Inter-orbit (LEFT/RIGHT/DIAG) - Per Shell
         for o in range(self.num_orbits):
-            if self.num_orbits <= 1: continue     
+            is_polar = (o < num_polar)
+            
+            if is_polar:
+                base_o = 0
+                count_o = num_polar
+                eff_o = o
+            else:
+                base_o = num_polar
+                count_o = self.num_orbits - num_polar
+                eff_o = o - num_polar
+                
+            if count_o <= 1: continue
+
             for p in range(self.num_sats_per_orbit):
                 sat_id = self.get_sat_id(o, p)
                 
-                # Right neighbor (next orbit)
-                right_o = (o + 1) % self.num_orbits
+                # Right neighbor (next orbit in shell)
+                right_eff = (eff_o + 1) % count_o
+                right_o = base_o + right_eff
                 right_id = self.get_sat_id(right_o, p)
-                self.satellites[sat_id].add_neighbor('RIGHT', right_id)
-                self.graph.add_edge(sat_id, right_id, direction='RIGHT')
-
-                # Left neighbor (prev orbit)
-                left_o = (o - 1 + self.num_orbits) % self.num_orbits
-                left_id = self.get_sat_id(left_o, p)
-                self.satellites[sat_id].add_neighbor('LEFT', left_id)
-                self.graph.add_edge(sat_id, left_id, direction='LEFT')
-
-                # --- Diagonal Neighbors (Enhanced Connectivity) ---
-                # UP-RIGHT (Next Phase, Next Orbit)
-                ur_p = (p + 1) % self.num_sats_per_orbit
-                ur_o = (o + 1) % self.num_orbits
-                ur_id = self.get_sat_id(ur_o, ur_p)
-                self.satellites[sat_id].add_neighbor('UP_RIGHT', ur_id)
-                self.graph.add_edge(sat_id, ur_id, direction='UP_RIGHT')
-
-                # UP-LEFT (Next Phase, Prev Orbit)
-                ul_p = (p + 1) % self.num_sats_per_orbit
-                ul_o = (o - 1 + self.num_orbits) % self.num_orbits
-                ul_id = self.get_sat_id(ul_o, ul_p)
-                self.satellites[sat_id].add_neighbor('UP_LEFT', ul_id)
-                self.graph.add_edge(sat_id, ul_id, direction='UP_LEFT')
                 
-                # DOWN-RIGHT (Prev Phase, Next Orbit)
+                self.satellites[sat_id].add_neighbor('RIGHT', right_id)
+                self.graph.add_edge(sat_id, right_id, direction='RIGHT', type='inter')
+
+                # Left neighbor (prev orbit in shell)
+                left_eff = (eff_o - 1 + count_o) % count_o
+                left_o = base_o + left_eff
+                left_id = self.get_sat_id(left_o, p)
+                
+                self.satellites[sat_id].add_neighbor('LEFT', left_id)
+                self.graph.add_edge(sat_id, left_id, direction='LEFT', type='inter')
+
+                # Diagonals (Enhanced Connectivity)
+                # UP-RIGHT
+                ur_p = (p + 1) % self.num_sats_per_orbit
+                ur_id = self.get_sat_id(right_o, ur_p)
+                self.satellites[sat_id].add_neighbor('UP_RIGHT', ur_id)
+                self.graph.add_edge(sat_id, ur_id, direction='UP_RIGHT', type='inter')
+
+                # UP-LEFT
+                ul_p = (p + 1) % self.num_sats_per_orbit
+                ul_id = self.get_sat_id(left_o, ul_p)
+                self.satellites[sat_id].add_neighbor('UP_LEFT', ul_id)
+                self.graph.add_edge(sat_id, ul_id, direction='UP_LEFT', type='inter')
+                
+                # DOWN-RIGHT
                 dr_p = (p - 1 + self.num_sats_per_orbit) % self.num_sats_per_orbit
-                dr_o = (o + 1) % self.num_orbits
-                dr_id = self.get_sat_id(dr_o, dr_p)
+                dr_id = self.get_sat_id(right_o, dr_p)
                 self.satellites[sat_id].add_neighbor('DOWN_RIGHT', dr_id)
-                self.graph.add_edge(sat_id, dr_id, direction='DOWN_RIGHT')
+                self.graph.add_edge(sat_id, dr_id, direction='DOWN_RIGHT', type='inter')
 
-                # DOWN-LEFT (Prev Phase, Prev Orbit)
+                # DOWN-LEFT
                 dl_p = (p - 1 + self.num_sats_per_orbit) % self.num_sats_per_orbit
-                dl_o = (o - 1 + self.num_orbits) % self.num_orbits
-                dl_id = self.get_sat_id(dl_o, dl_p)
+                dl_id = self.get_sat_id(left_o, dl_p)
                 self.satellites[sat_id].add_neighbor('DOWN_LEFT', dl_id)
-                self.graph.add_edge(sat_id, dl_id, direction='DOWN_LEFT')
+                self.graph.add_edge(sat_id, dl_id, direction='DOWN_LEFT', type='inter')
+                
+        # --- Cross-Shell Connectivity ---
+        # Connect every Inclined Sat to every Polar Sat (Potentially)
+        # We rely on dynamic LoS/Distance filtering to sparsify this
+        if self.num_orbits > num_polar:
+            for o_i in range(num_polar, self.num_orbits):
+                for p_i in range(self.num_sats_per_orbit):
+                    sat_u = self.get_sat_id(o_i, p_i)
+                    
+                    for o_p in range(num_polar):
+                        for p_p in range(self.num_sats_per_orbit):
+                             sat_v = self.get_sat_id(o_p, p_p)
+                             
+                             # Add edge u -> v and v -> u
+                             self.graph.add_edge(sat_u, sat_v, direction='CROSS', type='cross')
+                             self.graph.add_edge(sat_v, sat_u, direction='CROSS', type='cross')
 
-        # --- Initialize Link States (GRouting Physical Layer) ---
-        # "e_i" fields: Available BW, Occupied BW, Betweenness, etc.
-        total_bw = 1000.0 # Mbps
+        # --- Initialize Link States ---
+        total_bw = 5000.0 # Mbps
         
-        # Calculate static betweenness (approximate strategic importance)
-        # Using undirected graph for calc to speed up/simplify, then map back? 
-        # Or just directed. For 60 nodes directed is fast.
-        try:
-            bet_cen = nx.edge_betweenness_centrality(self.graph)
-        except:
-            bet_cen = {}
+        # Static Betweenness is expensive with cross-links (N^2 edges)
+        # Skip bet_cen for speed or use approximation
+        # bet_cen = nx.edge_betweenness_centrality(self.graph) 
+        bet_cen = {}
 
         for n_u, n_v in self.graph.edges():
             self.graph.edges[n_u, n_v]['bw_total'] = total_bw
             self.graph.edges[n_u, n_v]['bw_occupied'] = 0.0 # Dynamic
-            self.graph.edges[n_u, n_v]['betweenness'] = bet_cen.get((n_u, n_v), 0.0)
-            self.graph.edges[n_u, n_v]['quality'] = 1.0 # 0.0 to 1.0 (Stochastic)
+            self.graph.edges[n_u, n_v]['betweenness'] = 0.0
+            self.graph.edges[n_u, n_v]['quality'] = 1.0
 
     def set_satellite_status(self, sat_id, active):
         if sat_id in self.satellites:
@@ -159,7 +191,7 @@ class Constellation:
         # Check if segment intersects Earth sphere
         # Earth center at [0,0,0], radius R
         R = 6371.0
-        ATMOSPHERE = 500.0 # Conservative Margin to ensure no visual clipping
+        ATMOSPHERE = 0.0 # Conservative Margin to ensure no visual clipping
         R_safe = R + ATMOSPHERE
         
         # Vector from p1 to p2
@@ -193,7 +225,7 @@ class Constellation:
     def update_traffic(self, time, positions):
         # Simulate traffic based on DISTANCE (User Request)
         # load_factor proportional to link distance
-        MAX_DIST = 5000.0 # Approx max ISL distance in km
+        MAX_DIST = 8000.0 # Approx max ISL distance in km
         
         for u, v in self.graph.edges():
             # Enforce symmetry: only process if u < v

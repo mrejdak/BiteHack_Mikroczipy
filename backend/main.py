@@ -28,8 +28,8 @@ class SimulationState:
     def __init__(self):
         self.start_time = time.time()
         # Scale: 6x10
-        num_orbits = 4
-        num_sats = 20
+        num_orbits = 8
+        num_sats = 10
         self.constellation = Constellation(num_orbits, num_sats)
         # Pick disjoint orbits for Src/Dst
         import random
