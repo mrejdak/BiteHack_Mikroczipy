@@ -112,7 +112,7 @@ class MockDetectionService:
             # Determine severity based on confidence
             if conf >= 0.8:
                 severity = "high"
-            elif conf >= 0.5:
+            elif conf >= 0.4:
                 severity = "medium"
             else:
                 severity = "low"
