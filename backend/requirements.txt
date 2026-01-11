@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+python-multipart
+rasterio
+shapely
+pyproj
+overpy
+requests
+websockets
+pytest
