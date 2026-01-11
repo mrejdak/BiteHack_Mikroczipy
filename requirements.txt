@@ -1,8 +1,9 @@
-torch
-networkx
 fastapi
 uvicorn
-scipy
-poliastro
+networkx
+numpy
+torch
 astropy
-gymnasium
+matplotlib
+pydantic
+requests
