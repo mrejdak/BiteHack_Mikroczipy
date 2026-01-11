@@ -1,5 +1,5 @@
 import { Fragment } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Circle } from 'react-leaflet';
 import { useAlertStore } from '../../store/useAlertStore';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -41,25 +41,7 @@ const FireMap = () => {
                         radius={1000}
                         pathOptions={{ color: 'red', fillColor: 'red', fillOpacity: 0.3 }}
                     />
-                    <Marker position={[alert.location.lat, alert.location.lon]} icon={fireIcon}>
-                        <Popup>
-                            <div>
-                                <h3>🔥 Fire Detected</h3>
-                                <p>Severity: {alert.severity}</p>
-                                <p>Time: {new Date(alert.timestamp).toLocaleString()}</p>
-                                {alert.infrastructure.length > 0 && (
-                                    <div>
-                                        <h4>Nearby Infrastructure:</h4>
-                                        <ul>
-                                            {alert.infrastructure.map((infra, i) => (
-                                                <li key={i}>{infra.name || 'Unnamed'} ({infra.type || 'Unknown'})</li>
-                                            ))}
-                                        </ul>
-                                    </div>
-                                )}
-                            </div>
-                        </Popup>
-                    </Marker>
+                    <Marker position={[alert.location.lat, alert.location.lon]} icon={fireIcon} />
                 </Fragment>
             ))}
         </MapContainer>

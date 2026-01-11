@@ -1,7 +1,21 @@
 import overpy
 import asyncio
-from typing import List
+import math
+from typing import List, Tuple
 from ..models.schemas import InfrastructureData
+
+def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate the great-circle distance between two points on Earth in meters."""
+    R = 6371000  # Earth radius in meters
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+    
+    a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    
+    return R * c
 
 class OSMService:
     def __init__(self):
@@ -10,11 +24,8 @@ class OSMService:
     async def check_infrastructure(self, lat: float, lon: float, radius: int = 500) -> List[InfrastructureData]:
         """
         Query Overpass API for industrial/commercial buildings around the coordinates.
+        Returns the 5 closest infrastructure items.
         """
-        # Overpass QL query
-        # Looking for factories, industrial buildings, warehouses, etc.
-        # Improved Overpass QL query using regex for building types
-        # Also including relations (rel), common for large complexes.
         query = f"""
         [out:json];
         (
@@ -24,51 +35,55 @@ class OSMService:
           way["man_made"="works"](around:{radius},{lat},{lon});
           node["man_made"="works"](around:{radius},{lat},{lon});
         );
-        out body;
-        >;
-        out skel qt;
+        out body center;
         """
 
         try:
-            # interacting with external API, run in thread pool to not block async loop if sync lib
-            # overpy is synchronous
             result = await asyncio.to_thread(self.api.query, query)
             
             print(f"OSM Results: {len(result.ways)} ways, {len(result.nodes)} nodes, {len(result.relations)} relations found.")
             
-            infrastructure = []
+            infrastructure_with_distance: List[Tuple[float, InfrastructureData]] = []
             
-            # Helper to extract from elements
-            def process_element(element):
+            def process_element(element, element_lat: float, element_lon: float):
                 name = element.tags.get("name", None)
                 building_type = element.tags.get("building", element.tags.get("man_made", "Unknown"))
                 operator = element.tags.get("operator", None)
                 address = element.tags.get("addr:street", None)
                 
-                # If we don't have a name, maybe we can use the building type as a fallback name
                 display_name = name if name else f"{building_type.capitalize()} Building"
                 
-                return InfrastructureData(
+                distance = haversine_distance(lat, lon, element_lat, element_lon)
+                
+                infra = InfrastructureData(
                     name=display_name,
                     type=building_type,
                     operator=operator,
                     address=address
                 )
+                return (distance, infra)
 
             for way in result.ways:
-                infrastructure.append(process_element(way))
+                # Use center_lat/center_lon for ways (requires 'out body center')
+                if hasattr(way, 'center_lat') and way.center_lat is not None:
+                    infrastructure_with_distance.append(process_element(way, float(way.center_lat), float(way.center_lon)))
 
             for node in result.nodes:
-                # Often nodes don't have tags if they are just parts of ways, 
-                # but if they have building/man_made tags they are standalone.
                 if "building" in node.tags or "man_made" in node.tags or "name" in node.tags:
-                    infrastructure.append(process_element(node))
+                    infrastructure_with_distance.append(process_element(node, float(node.lat), float(node.lon)))
 
             for rel in result.relations:
-                infrastructure.append(process_element(rel))
-                
-            return infrastructure
+                if hasattr(rel, 'center_lat') and rel.center_lat is not None:
+                    infrastructure_with_distance.append(process_element(rel, float(rel.center_lat), float(rel.center_lon)))
+            
+            # Sort by distance (closest first) and take top 5
+            infrastructure_with_distance.sort(key=lambda x: x[0])
+            top_5 = [infra for _, infra in infrastructure_with_distance[:5]]
+            
+            print(f"Returning {len(top_5)} closest infrastructure items.")
+            return top_5
 
         except Exception as e:
             print(f"OSM Query Error: {e}")
             return []
+
