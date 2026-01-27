@@ -10,7 +10,7 @@ A comprehensive system for detecting wildfires using satellite imagery.
 - **Backend**: Python FastAPI service utilizing Computer Vision (OpenCV, YOLO/Ultralytics) and geospatial libraries (Rasterio, Shapely) to process satellite data.
 
 ### 2. GNN Satellite Routing (`gnn_network/`)
-A simulation and visualization of satellite network routing using Graph Neural Networks (GNN).
+A simulation and visualization of satellite network routing using Graph Neural Networks and Deep Q Reinforcement Learning.
 - **Frontend**: High-performance React + Vite application for visualizing satellite constellations and routing paths.
 - **Backend**: FastAPI Application with PyTorch and NetworkX, implementing intelligent routing algorithms that optimize for latency and throughput in dynamic space topologies.
 
